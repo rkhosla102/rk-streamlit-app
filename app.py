@@ -23,8 +23,12 @@ def load_data():
 
     return df
 
-
 df = load_data()
+
+# Clean INDUSTRY column
+df["INDUSTRY"] = df["INDUSTRY"].astype(str).fillna("Unknown")
+df = df[df["INDUSTRY"].str.strip() != ""]
+
 
 st.sidebar.header("Filters")
 
