@@ -1,27 +1,33 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import numpy as np
 
-st.set_page_config(page_title="monday.com CRO Revenue Command Center", layout="wide")
+st.set_page_config(
+    page_title="monday.com CRO Revenue Command Center",
+    layout="wide"
+)
 
 # ==========================================================
-# LOAD STRATEGIC WAPP DATA
+# LOAD DATA
 # ==========================================================
 
 @st.cache_data
 def load_data():
     df = pd.read_csv("wapp_data.csv")
+
     df["WEEKLY_REVISED"] = pd.to_datetime(df["WEEKLY_REVISED"], errors="coerce")
 
     numeric_cols = ["WAPP_NEW", "WAPP_RESURRECT", "WAPP_CHURN", "WAPP"]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    df["INDUSTRY"] = df["INDUSTRY"].astype(str)
+    df["INDUSTRY"] = df["INDUSTRY"].astype(str).replace("nan", "Unknown")
     df["REGION"] = df["REGION"].fillna("NA").replace("nan", "NA").astype(str)
 
     df["NET_WAPP"] = df["WAPP_NEW"] + df["WAPP_RESURRECT"] - df["WAPP_CHURN"]
+
     return df
 
 df = load_data()
@@ -30,7 +36,7 @@ df = load_data()
 # SIDEBAR FILTERS
 # ==========================================================
 
-st.sidebar.header("Filters")
+st.sidebar.header("Strategic Filters")
 
 min_date = df["WEEKLY_REVISED"].min()
 max_date = df["WEEKLY_REVISED"].max()
@@ -43,10 +49,19 @@ date_range = st.sidebar.date_input(
 industries = sorted(df["INDUSTRY"].unique())
 regions = sorted(df["REGION"].unique())
 
-selected_industries = st.sidebar.multiselect("Industries", industries, default=industries)
-selected_regions = st.sidebar.multiselect("Regions", regions, default=regions)
+selected_industries = st.sidebar.multiselect(
+    "Industries",
+    industries,
+    default=industries
+)
 
-df = df[
+selected_regions = st.sidebar.multiselect(
+    "Regions",
+    regions,
+    default=regions
+)
+
+df_filtered = df[
     (df["WEEKLY_REVISED"] >= pd.Timestamp(date_range[0])) &
     (df["WEEKLY_REVISED"] <= pd.Timestamp(date_range[1])) &
     (df["INDUSTRY"].isin(selected_industries)) &
@@ -54,188 +69,183 @@ df = df[
 ]
 
 # ==========================================================
-# STRATEGIC WAPP SECTION
+# STRATEGIC SECTION
 # ==========================================================
 
 st.title("📊 CRO Strategic + Tactical Revenue Command Center")
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Net WAPP", f"{int(df['NET_WAPP'].sum()):,}")
-col2.metric("New WAPP", f"{int(df['WAPP_NEW'].sum()):,}")
-col3.metric("Resurrect WAPP", f"{int(df['WAPP_RESURRECT'].sum()):,}")
-col4.metric("Churn WAPP", f"{int(df['WAPP_CHURN'].sum()):,}")
+
+col1.metric("Net WAPP", f"{int(df_filtered['NET_WAPP'].sum()):,}")
+col2.metric("New WAPP", f"{int(df_filtered['WAPP_NEW'].sum()):,}")
+col3.metric("Resurrect WAPP", f"{int(df_filtered['WAPP_RESURRECT'].sum()):,}")
+col4.metric("Churn WAPP", f"{int(df_filtered['WAPP_CHURN'].sum()):,}")
 
 st.markdown("---")
 
-industry = df.groupby("INDUSTRY").agg(
+industry_summary = df_filtered.groupby("INDUSTRY").agg(
     New=("WAPP_NEW","sum"),
     Resurrect=("WAPP_RESURRECT","sum"),
     Churn=("WAPP_CHURN","sum"),
     Net=("NET_WAPP","sum")
 ).reset_index().sort_values("Net", ascending=False)
 
-fig_strategic = px.bar(
-    industry.head(10),
+fig_industry = px.bar(
+    industry_summary.head(10),
     x="INDUSTRY",
     y=["New","Resurrect","Churn"],
     barmode="group",
-    title="Strategic WAPP Breakdown"
+    title="Top Industries — WAPP Breakdown"
 )
-st.plotly_chart(fig_strategic, use_container_width=True)
 
-st.markdown("-------------------------------------------------------------------")
-
-# ==========================================================
-# 🎯 SALES HIRING → REVENUE IMPACT DASHBOARD
-# ==========================================================
-
-st.header("🎯 Sales Hiring → Revenue Impact Dashboard")
-
-# --- Executive Summary (Mock Data)
-
-Q1_goal_AE = 85
-current_AE = 68
-pipeline_AE = 12
-shortage_AE = Q1_goal_AE - (current_AE + pipeline_AE)
-ARR_per_AE = 800000
-revenue_gap = shortage_AE * ARR_per_AE * 0.5  # assume partial ramp
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Q1 AE Goal", "85")
-col2.metric("Current AEs", "68")
-col3.metric("In Pipeline", "12")
-col4.metric("Revenue Gap", f"${revenue_gap/1_000_000:.1f}M")
-
-st.markdown("**Total Revenue At Risk:** $2.9M ARR")
-st.markdown("**Time to Close Gap:** 8 weeks at current velocity")
+st.plotly_chart(fig_industry, use_container_width=True)
 
 st.markdown("---")
 
 # ==========================================================
-# FUNNEL VIEW (Mock)
+# TACTICAL LAYER
 # ==========================================================
 
-st.subheader("Funnel View — Project Management AEs")
+st.header("🎯 Sales Hiring → Revenue Impact")
 
-funnel_data = pd.DataFrame({
-    "Stage": [
-        "Sourcing",
-        "Phone Screen",
-        "Hiring Manager",
-        "Final Round",
-        "Offer Extended",
-        "Offer Accepted"
-    ],
-    "Count": [45, 30, 24, 18, 12, 10]
+st.sidebar.header("Hiring Scenario Controls")
+
+role = st.sidebar.selectbox(
+    "Role Type",
+    ["Account Executives", "SDRs", "CSMs"]
+)
+
+quarter_goal = st.sidebar.number_input("Quarter Hiring Goal", min_value=1, value=20)
+current_headcount = st.sidebar.number_input("Current Active Headcount", min_value=0, value=15)
+pipeline_count = st.sidebar.number_input("Candidates in Pipeline", min_value=0, value=8)
+
+avg_quota = st.sidebar.number_input("Avg Annual Quota ($)", value=800000)
+quota_attainment = st.sidebar.slider("Quota Attainment %", 50, 100, 70)
+ramp_months = st.sidebar.slider("Ramp Time (months)", 3, 9, 6)
+
+# ==========================================================
+# EXECUTIVE SUMMARY — REVENUE GAP
+# ==========================================================
+
+hires_gap = max(0, quarter_goal - (current_headcount + pipeline_count))
+revenue_per_role = avg_quota * (quota_attainment / 100)
+revenue_at_risk = hires_gap * revenue_per_role * (ramp_months / 12)
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Quarter Goal", quarter_goal)
+col2.metric("Active", current_headcount)
+col3.metric("Pipeline", pipeline_count)
+col4.metric("Revenue at Risk", f"${revenue_at_risk/1_000_000:.2f}M")
+
+st.markdown("---")
+
+# ==========================================================
+# FUNNEL SIMULATION
+# ==========================================================
+
+st.subheader("📊 Hiring Funnel Simulation")
+
+stage_names = [
+    "Sourcing",
+    "Phone Screen",
+    "Hiring Manager",
+    "Final Round",
+    "Offer Extended",
+    "Offer Accepted"
+]
+
+drop_rates = [1, 0.7, 0.8, 0.75, 0.8, 0.85]
+
+counts = []
+base = max(pipeline_count * 3, 1)
+
+for rate in drop_rates:
+    base = int(base * rate)
+    counts.append(base)
+
+funnel_df = pd.DataFrame({
+    "Stage": stage_names,
+    "Candidates": counts
 })
 
 fig_funnel = px.bar(
-    funnel_data,
+    funnel_df,
     x="Stage",
-    y="Count",
-    title="Hiring Funnel — PM AEs"
+    y="Candidates",
+    title=f"{role} Funnel"
 )
 
 st.plotly_chart(fig_funnel, use_container_width=True)
 
-st.markdown("⚠️ Bottleneck: Sourcing conversion below 75% target")
-
 st.markdown("---")
 
 # ==========================================================
-# TIME TO PRODUCTIVITY
+# RAMP MODEL
 # ==========================================================
 
-st.subheader("Ramp to Productivity — Q4 2025 AE Cohort")
+st.subheader("⏱ Time to Productivity")
 
-months = ["M1","M2","M3","M4","M5","M6"]
-target = [0,20,40,60,80,100]
-actual = [0,18,35,52,68,80]
+months = list(range(1, ramp_months + 1))
+target_ramp = np.linspace(0, 100, ramp_months)
+actual_ramp = target_ramp * (quota_attainment / 100)
 
 ramp_df = pd.DataFrame({
     "Month": months,
-    "Target Ramp %": target,
-    "Actual Ramp %": actual
+    "Target Ramp %": target_ramp,
+    "Actual Ramp %": actual_ramp
 })
 
 fig_ramp = px.line(
     ramp_df,
     x="Month",
     y=["Target Ramp %","Actual Ramp %"],
-    title="Ramp vs Target"
+    markers=True
 )
 
 st.plotly_chart(fig_ramp, use_container_width=True)
 
-st.markdown("⚠️ Ramp 12% behind benchmark — onboarding gap suspected")
+st.markdown("---")
+
+# ==========================================================
+# SCENARIO PLANNER
+# ==========================================================
+
+st.subheader("🧮 Scenario Planner")
+
+hires_per_month = st.slider("Hires per Month", 1, 15, 5)
+time_to_hire = st.slider("Time to Hire (Days)", 20, 90, 45)
+
+projected_arr = hires_per_month * revenue_per_role
+
+col1, col2 = st.columns(2)
+col1.metric("Projected Annual ARR Impact", f"${projected_arr/1_000_000:.2f}M")
+col2.metric("Time to Hire", f"{time_to_hire} days")
 
 st.markdown("---")
 
 # ==========================================================
-# SCENARIO PLANNING
+# QUALITY VS SPEED VISUAL
 # ==========================================================
 
-st.subheader("Scenario Planning — Revenue Impact Simulator")
-
-hires_per_month = st.slider("AEs Hired per Month", 2, 12, 6)
-quota = 800000
-attainment = st.slider("Quota Attainment %", 50, 100, 68)
-
-ARR_impact = hires_per_month * quota * (attainment/100)
-
-st.metric("Projected Annual ARR Impact", f"${ARR_impact/1_000_000:.1f}M")
-
-st.markdown("---")
-
-# ==========================================================
-# BOTTLENECK ANALYSIS (Mock)
-# ==========================================================
-
-st.subheader("Top Bottlenecks Slowing Revenue")
-
-st.markdown("""
-🔴 **Sourcing Capacity (PM AEs)**  
-→ 2.6:1 pipeline ratio (target 5:1)  
-→ $3.8M ARR at risk  
-
-🟡 **Final Round Scheduling Delays**  
-→ 10 days vs 5 day benchmark  
-
-🟡 **APAC Offer Acceptance (75%)**  
-→ 10% below NA benchmark  
-""")
-
-st.markdown("---")
-
-# ==========================================================
-# QUALITY VS SPEED
-# ==========================================================
-
-st.subheader("Hiring Quality vs Speed")
+st.subheader("📈 Hiring Speed vs Revenue Output")
 
 quality_df = pd.DataFrame({
-    "Cohort":["Q1 2025","Q2 2025","Q3 2025","Q4 2025"],
-    "Time_to_Hire":[42,38,51,45],
-    "Retention_90d":[92,87,78,90],
-    "Quota_%":[74,68,62,70]
+    "Time_to_Hire":[35,45,55,60],
+    "Quota_Attainment":[75,70,62,58],
+    "Cohort":["Fast","Moderate","Slow","Very Slow"]
 })
 
 fig_quality = px.scatter(
     quality_df,
     x="Time_to_Hire",
-    y="Quota_%",
-    size="Retention_90d",
-    color="Cohort",
-    title="Hiring Speed vs Quota Performance"
+    y="Quota_Attainment",
+    size="Quota_Attainment",
+    color="Cohort"
 )
 
 st.plotly_chart(fig_quality, use_container_width=True)
 
 st.markdown("---")
 
-st.markdown("🔴 Critical: AE shortage in PM vertical → $2.1M ARR at risk")
-st.markdown("🟡 High Priority: Ramp lagging 12%")
-st.markdown("🟢 Wins: SDR hiring on track")
-
-
+st.success("Dashboard ready for CRO scenario planning.")
