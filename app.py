@@ -9,10 +9,20 @@ st.title("📋 CRO Hiring & Growth Dashboard")
 @st.cache_data
 def load_data():
     df = pd.read_csv("wapp_data.csv")
-    df["WEEKLY_REVISED"] = pd.to_datetime(df["WEEKLY_REVISED"])
-    df = df.fillna(0)
+
+    # Convert date
+    df["WEEKLY_REVISED"] = pd.to_datetime(df["WEEKLY_REVISED"], errors="coerce")
+
+    # Convert numeric columns safely
+    numeric_cols = ["WAPP_NEW", "WAPP_RESURRECT", "WAPP_CHURN", "WAPP"]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # Create Net WAPP
     df["NET_WAPP"] = df["WAPP_NEW"] + df["WAPP_RESURRECT"] - df["WAPP_CHURN"]
+
     return df
+
 
 df = load_data()
 
