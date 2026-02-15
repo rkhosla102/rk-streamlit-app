@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import numpy as np
 
 st.set_page_config(
@@ -69,17 +68,22 @@ df_filtered = df[
 ]
 
 # ==========================================================
-# STRATEGIC SECTION
+# STRATEGIC SECTION — WAPP PERFORMANCE
 # ==========================================================
 
 st.title("📊 CRO Strategic + Tactical Revenue Command Center")
 
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Net WAPP", f"{int(df_filtered['NET_WAPP'].sum()):,}")
-col2.metric("New WAPP", f"{int(df_filtered['WAPP_NEW'].sum()):,}")
-col3.metric("Resurrect WAPP", f"{int(df_filtered['WAPP_RESURRECT'].sum()):,}")
-col4.metric("Churn WAPP", f"{int(df_filtered['WAPP_CHURN'].sum()):,}")
+total_net = df_filtered["NET_WAPP"].sum()
+total_new = df_filtered["WAPP_NEW"].sum()
+total_res = df_filtered["WAPP_RESURRECT"].sum()
+total_churn = df_filtered["WAPP_CHURN"].sum()
+
+col1.metric("Net WAPP", f"{int(total_net):,}")
+col2.metric("New WAPP", f"{int(total_new):,}")
+col3.metric("Resurrect WAPP", f"{int(total_res):,}")
+col4.metric("Churn WAPP", f"{int(total_churn):,}")
 
 st.markdown("---")
 
@@ -103,12 +107,12 @@ st.plotly_chart(fig_industry, use_container_width=True)
 st.markdown("---")
 
 # ==========================================================
-# TACTICAL LAYER
+# DATA-DRIVEN REVENUE MODELING
 # ==========================================================
 
-st.header("🎯 Sales Hiring → Revenue Impact")
+st.header("🎯 Sales Hiring → Revenue Impact (Data Driven)")
 
-st.sidebar.header("Hiring Scenario Controls")
+st.sidebar.header("Hiring Controls")
 
 role = st.sidebar.selectbox(
     "Role Type",
@@ -118,25 +122,57 @@ role = st.sidebar.selectbox(
 quarter_goal = st.sidebar.number_input("Quarter Hiring Goal", min_value=1, value=20)
 current_headcount = st.sidebar.number_input("Current Active Headcount", min_value=0, value=15)
 pipeline_count = st.sidebar.number_input("Candidates in Pipeline", min_value=0, value=8)
-
-avg_quota = st.sidebar.number_input("Avg Annual Quota ($)", value=800000)
 quota_attainment = st.sidebar.slider("Quota Attainment %", 50, 100, 70)
 ramp_months = st.sidebar.slider("Ramp Time (months)", 3, 9, 6)
 
 # ==========================================================
-# EXECUTIVE SUMMARY — REVENUE GAP
+# REVENUE ASSUMPTIONS FROM DATA
 # ==========================================================
 
-hires_gap = max(0, quarter_goal - (current_headcount + pipeline_count))
-revenue_per_role = avg_quota * (quota_attainment / 100)
-revenue_at_risk = hires_gap * revenue_per_role * (ramp_months / 12)
+# Use Net WAPP as proxy for demand capacity
+demand_factor = max(1, total_net)
+
+# Industry SaaS median quota benchmark
+BASE_AE_QUOTA = 750000
+
+ROLE_MULTIPLIER = {
+    "Account Executives": 1.0,
+    "SDRs": 0.25,
+    "CSMs": 0.4
+}
+
+arr_quota = BASE_AE_QUOTA * ROLE_MULTIPLIER[role]
+
+# scale ARR capacity based on filtered WAPP growth
+growth_scaler = demand_factor / df["NET_WAPP"].sum()
+scaled_quota = arr_quota * growth_scaler
+
+# ramp adjustment
+ramp_factor = min(1.0, ramp_months / 6)
+
+effective_arr_per_rep = scaled_quota * (quota_attainment / 100) * ramp_factor
+
+# ARR capacity
+existing_arr = current_headcount * effective_arr_per_rep
+
+pipeline_conversion_rate = 0.5
+expected_new_hires = int(pipeline_count * pipeline_conversion_rate)
+pipeline_arr = expected_new_hires * effective_arr_per_rep
+
+required_arr = quarter_goal * effective_arr_per_rep
+
+arr_gap = max(0, required_arr - (existing_arr + pipeline_arr))
+
+# ==========================================================
+# EXEC SUMMARY
+# ==========================================================
 
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("Quarter Goal", quarter_goal)
-col2.metric("Active", current_headcount)
-col3.metric("Pipeline", pipeline_count)
-col4.metric("Revenue at Risk", f"${revenue_at_risk/1_000_000:.2f}M")
+col1.metric("ARR Capacity (Current + Pipeline)", f"${existing_arr + pipeline_arr:,.0f}")
+col2.metric("ARR Required to Hit Goal", f"${required_arr:,.0f}")
+col3.metric("Revenue at Risk", f"${arr_gap:,.0f}")
+col4.metric("Effective ARR / Rep", f"${effective_arr_per_rep:,.0f}")
 
 st.markdown("---")
 
@@ -181,10 +217,10 @@ st.plotly_chart(fig_funnel, use_container_width=True)
 st.markdown("---")
 
 # ==========================================================
-# RAMP MODEL
+# RAMP VISUAL
 # ==========================================================
 
-st.subheader("⏱ Time to Productivity")
+st.subheader("⏱ Ramp to Productivity")
 
 months = list(range(1, ramp_months + 1))
 target_ramp = np.linspace(0, 100, ramp_months)
@@ -208,44 +244,20 @@ st.plotly_chart(fig_ramp, use_container_width=True)
 st.markdown("---")
 
 # ==========================================================
-# SCENARIO PLANNER
+# SCENARIO SIMULATOR
 # ==========================================================
 
-st.subheader("🧮 Scenario Planner")
+st.subheader("🧮 Scenario Simulator")
 
 hires_per_month = st.slider("Hires per Month", 1, 15, 5)
-time_to_hire = st.slider("Time to Hire (Days)", 20, 90, 45)
+time_to_hire_days = st.slider("Time to Hire (Days)", 20, 90, 45)
 
-projected_arr = hires_per_month * revenue_per_role
+projected_arr = hires_per_month * effective_arr_per_rep
 
 col1, col2 = st.columns(2)
-col1.metric("Projected Annual ARR Impact", f"${projected_arr/1_000_000:.2f}M")
-col2.metric("Time to Hire", f"{time_to_hire} days")
+col1.metric("Projected Annual ARR Impact", f"${projected_arr:,.0f}")
+col2.metric("Time to Hire", f"{time_to_hire_days} days")
 
 st.markdown("---")
 
-# ==========================================================
-# QUALITY VS SPEED VISUAL
-# ==========================================================
-
-st.subheader("📈 Hiring Speed vs Revenue Output")
-
-quality_df = pd.DataFrame({
-    "Time_to_Hire":[35,45,55,60],
-    "Quota_Attainment":[75,70,62,58],
-    "Cohort":["Fast","Moderate","Slow","Very Slow"]
-})
-
-fig_quality = px.scatter(
-    quality_df,
-    x="Time_to_Hire",
-    y="Quota_Attainment",
-    size="Quota_Attainment",
-    color="Cohort"
-)
-
-st.plotly_chart(fig_quality, use_container_width=True)
-
-st.markdown("---")
-
-st.success("Dashboard ready for CRO scenario planning.")
+st.success("Revenue modeling tied dynamically to WAPP demand + hiring inputs.")
