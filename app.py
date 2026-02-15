@@ -40,25 +40,13 @@ st.sidebar.header("Strategic Filters")
 min_date = df["WEEKLY_REVISED"].min()
 max_date = df["WEEKLY_REVISED"].max()
 
-date_range = st.sidebar.date_input(
-    "Date Range",
-    value=(min_date, max_date)
-)
+date_range = st.sidebar.date_input("Date Range", value=(min_date, max_date))
 
 industries = sorted(df["INDUSTRY"].unique())
 regions = sorted(df["REGION"].unique())
 
-selected_industries = st.sidebar.multiselect(
-    "Industries",
-    industries,
-    default=industries
-)
-
-selected_regions = st.sidebar.multiselect(
-    "Regions",
-    regions,
-    default=regions
-)
+selected_industries = st.sidebar.multiselect("Industries", industries, default=industries)
+selected_regions = st.sidebar.multiselect("Regions", regions, default=regions)
 
 df_filtered = df[
     (df["WEEKLY_REVISED"] >= pd.Timestamp(date_range[0])) &
@@ -104,10 +92,10 @@ industry_summary = df_filtered.groupby("INDUSTRY").agg(
     Resurrect=("WAPP_RESURRECT","sum"),
     Churn=("WAPP_CHURN","sum"),
     Net=("NET_WAPP","sum")
-).reset_index()
+).reset_index().sort_values("Net", ascending=False)
 
 fig_industry = px.bar(
-    industry_summary.sort_values("Net", ascending=False).head(10),
+    industry_summary.head(10),
     x="INDUSTRY",
     y=["New","Resurrect","Churn"],
     barmode="group",
@@ -163,11 +151,7 @@ def classify(row):
         return "⚪ Monitor"
 
 industry_diag["Strategic_Action"] = industry_diag.apply(classify, axis=1)
-industry_diag["Opportunity_Score"] = (
-    industry_diag["Net"] * industry_diag["WER"]
-).abs()
-
-industry_diag = industry_diag.sort_values("Opportunity_Score", ascending=False)
+industry_diag["Opportunity_Score"] = (industry_diag["Net"] * industry_diag["WER"]).abs()
 
 st.dataframe(industry_diag.round(2), use_container_width=True)
 
@@ -202,31 +186,22 @@ if not growth.empty:
 st.markdown("---")
 
 # ==========================================================
-# REVENUE MODELING
+# DATA-DRIVEN REVENUE MODELING
 # ==========================================================
 
-st.header("🎯 Sales Hiring → Revenue Impact")
+st.header("🎯 Sales Hiring → Revenue Impact (Data Driven)")
 
 st.sidebar.header("Hiring Controls")
 
-role = st.sidebar.selectbox(
-    "Role Type",
-    ["Account Executives", "SDRs", "CSMs"]
-)
-
-quarter_goal = st.sidebar.number_input("Quarter Hiring Goal", 1, value=20)
-current_headcount = st.sidebar.number_input("Current Active Headcount", 0, value=15)
-pipeline_count = st.sidebar.number_input("Candidates in Pipeline", 0, value=8)
+role = st.sidebar.selectbox("Role Type", ["Account Executives", "SDRs", "CSMs"])
+quarter_goal = st.sidebar.number_input("Quarter Hiring Goal", min_value=1, value=20)
+current_headcount = st.sidebar.number_input("Current Active Headcount", min_value=0, value=15)
+pipeline_count = st.sidebar.number_input("Candidates in Pipeline", min_value=0, value=8)
 quota_attainment = st.sidebar.slider("Quota Attainment %", 50, 100, 70)
 ramp_months = st.sidebar.slider("Ramp Time (months)", 3, 9, 6)
 
 BASE_AE_QUOTA = 750000
-
-ROLE_MULTIPLIER = {
-    "Account Executives": 1.0,
-    "SDRs": 0.25,
-    "CSMs": 0.4
-}
+ROLE_MULTIPLIER = {"Account Executives":1.0,"SDRs":0.25,"CSMs":0.4}
 
 arr_quota = BASE_AE_QUOTA * ROLE_MULTIPLIER[role]
 
@@ -239,14 +214,12 @@ effective_arr_per_rep = scaled_quota * (quota_attainment / 100) * ramp_factor
 existing_arr = current_headcount * effective_arr_per_rep
 expected_new_hires = int(pipeline_count * 0.5)
 pipeline_arr = expected_new_hires * effective_arr_per_rep
-
 required_arr = quarter_goal * effective_arr_per_rep
 arr_gap = max(0, required_arr - (existing_arr + pipeline_arr))
 
 col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("ARR Capacity", f"${existing_arr + pipeline_arr:,.0f}")
-col2.metric("ARR Required", f"${required_arr:,.0f}")
+col1.metric("ARR Capacity (Current + Pipeline)", f"${existing_arr + pipeline_arr:,.0f}")
+col2.metric("ARR Required to Hit Goal", f"${required_arr:,.0f}")
 col3.metric("Revenue at Risk", f"${arr_gap:,.0f}")
 col4.metric("Effective ARR / Rep", f"${effective_arr_per_rep:,.0f}")
 
@@ -256,47 +229,38 @@ st.markdown("---")
 # FUNNEL SIMULATION
 # ==========================================================
 
-st.subheader("📊 Hiring Funnel")
+st.subheader("📊 Hiring Funnel Simulation")
 
-stages = ["Sourcing","Phone Screen","Hiring Manager","Final Round","Offer","Accepted"]
-drop_rates = [1, 0.7, 0.8, 0.75, 0.8, 0.85]
+stage_names = ["Sourcing","Phone Screen","Hiring Manager","Final Round","Offer Extended","Offer Accepted"]
+drop_rates = [1,0.7,0.8,0.75,0.8,0.85]
 
-counts = []
-base = max(pipeline_count * 3, 1)
-
-for rate in drop_rates:
-    base = int(base * rate)
+counts=[]
+base=max(pipeline_count*3,1)
+for r in drop_rates:
+    base=int(base*r)
     counts.append(base)
 
-funnel_df = pd.DataFrame({"Stage": stages, "Candidates": counts})
+funnel_df=pd.DataFrame({"Stage":stage_names,"Candidates":counts})
 
-st.plotly_chart(
-    px.bar(funnel_df, x="Stage", y="Candidates"),
-    use_container_width=True
-)
+fig_funnel=px.bar(funnel_df,x="Stage",y="Candidates",title=f"{role} Funnel")
+st.plotly_chart(fig_funnel,use_container_width=True)
 
 st.markdown("---")
 
 # ==========================================================
-# RAMP MODEL
+# RAMP VISUAL
 # ==========================================================
 
 st.subheader("⏱ Ramp to Productivity")
 
-months = list(range(1, ramp_months + 1))
-target_ramp = np.linspace(0, 100, ramp_months)
-actual_ramp = target_ramp * (quota_attainment / 100)
+months=list(range(1,ramp_months+1))
+target=np.linspace(0,100,ramp_months)
+actual=target*(quota_attainment/100)
 
-ramp_df = pd.DataFrame({
-    "Month": months,
-    "Target": target_ramp,
-    "Actual": actual_ramp
-})
+ramp_df=pd.DataFrame({"Month":months,"Target Ramp %":target,"Actual Ramp %":actual})
 
-st.plotly_chart(
-    px.line(ramp_df, x="Month", y=["Target","Actual"], markers=True),
-    use_container_width=True
-)
+fig_ramp=px.line(ramp_df,x="Month",y=["Target Ramp %","Actual Ramp %"],markers=True)
+st.plotly_chart(fig_ramp,use_container_width=True)
 
 st.markdown("---")
 
@@ -306,9 +270,13 @@ st.markdown("---")
 
 st.subheader("🧮 Scenario Simulator")
 
-hires_per_month = st.slider("Hires per Month", 1, 15, 5)
-projected_arr = hires_per_month * effective_arr_per_rep
+hires_per_month=st.slider("Hires per Month",1,15,5)
+time_to_hire_days=st.slider("Time to Hire (Days)",20,90,45)
 
-st.metric("Projected ARR Impact", f"${projected_arr:,.0f}")
+projected_arr=hires_per_month*effective_arr_per_rep
 
-st.success("Strategic + Tactical CRO command center fully active.")
+col1,col2=st.columns(2)
+col1.metric("Projected Annual ARR Impact",f"${projected_arr:,.0f}")
+col2.metric("Time to Hire",f"{time_to_hire_days} days")
+
+st.success("Revenue modeling tied dynamically to WAPP demand + hiring inputs.")
