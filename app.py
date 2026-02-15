@@ -92,12 +92,24 @@ industry_summary = df_filtered.groupby("INDUSTRY").agg(
     Resurrect=("WAPP_RESURRECT","sum"),
     Churn=("WAPP_CHURN","sum"),
     Net=("NET_WAPP","sum")
-).reset_index().sort_values("Net", ascending=False)
+).reset_index()
+
+# Add dynamic sorting
+sort_metric = st.selectbox(
+    "Sort Industries By",
+    ["Net", "New", "Resurrect", "Churn"],
+    index=0
+)
+
+industry_sorted = industry_summary.sort_values(
+    sort_metric,
+    ascending=False
+)
 
 fig_industry = px.bar(
-    industry_summary.head(10),
+    industry_sorted.head(10),
     x="INDUSTRY",
-    y=["New","Resurrect","Churn"],
+    y=["New","Resurrect","Churn","Net"],  # <-- Net added here
     barmode="group",
     title="Top Industries — WAPP Breakdown"
 )
