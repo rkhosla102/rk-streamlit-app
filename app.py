@@ -74,7 +74,7 @@ df_filtered = df[
 st.title("📊 CRO Strategic + Tactical Revenue Command Center")
 
 # ==========================================================
-# STRATEGIC SECTION — WAPP PERFORMANCE
+# WAPP SUMMARY
 # ==========================================================
 
 col1, col2, col3, col4 = st.columns(4)
@@ -96,22 +96,14 @@ industry_summary = df_filtered.groupby("INDUSTRY").agg(
     Resurrect=("WAPP_RESURRECT","sum"),
     Churn=("WAPP_CHURN","sum"),
     Net=("NET_WAPP","sum")
-).reset_index().sort_values("Net", ascending=False)
+).reset_index()
 
-fig_industry = px.bar(
-    industry_summary.head(10),
-    x="INDUSTRY",
-    y=["New","Resurrect","Churn"],
-    barmode="group",
-    title="Top Industries — WAPP Breakdown"
-)
-
-st.plotly_chart(fig_industry, use_container_width=True)
-
-st.markdown("---")
+if industry_summary.empty:
+    st.warning("No data available for selected filters.")
+    st.stop()
 
 # ==========================================================
-# AUTOMATED CRO INDUSTRY INTELLIGENCE
+# INDUSTRY INTELLIGENCE ENGINE
 # ==========================================================
 
 st.header("🧠 Industry Prioritization Engine")
@@ -120,17 +112,17 @@ industry_diag = industry_summary.copy()
 
 industry_diag["WER"] = (
     (industry_diag["New"] + industry_diag["Resurrect"]) /
-    industry_diag["Churn"].replace(0, 1)
+    industry_diag["Churn"].replace(0, np.nan)
 )
 
 industry_diag["Resurrection_Dependency"] = (
     industry_diag["Resurrect"] /
-    (industry_diag["New"] + industry_diag["Resurrect"]).replace(0, 1)
+    (industry_diag["New"] + industry_diag["Resurrect"]).replace(0, np.nan)
 )
 
 industry_diag["New_to_Churn_Ratio"] = (
     industry_diag["New"] /
-    industry_diag["Churn"].replace(0, 1)
+    industry_diag["Churn"].replace(0, np.nan)
 )
 
 weeks_in_period = max(
@@ -140,6 +132,10 @@ weeks_in_period = max(
 
 industry_diag["Churn_Velocity"] = industry_diag["Churn"] / weeks_in_period
 
+# Clean infinities / NaNs
+industry_diag = industry_diag.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+# Strategic Classification
 def classify(row):
     if row["WER"] < 1 and row["Churn_Velocity"] > industry_diag["Churn_Velocity"].median():
         return "🔴 Fix Churn"
@@ -153,31 +149,38 @@ def classify(row):
         return "⚪ Monitor"
 
 industry_diag["Strategic_Action"] = industry_diag.apply(classify, axis=1)
-industry_diag["Opportunity_Score"] = industry_diag["Net"] * industry_diag["WER"]
+
+industry_diag["Opportunity_Score"] = (
+    industry_diag["Net"] * industry_diag["WER"]
+).abs()
 
 industry_diag = industry_diag.sort_values("Opportunity_Score", ascending=False)
 
-st.dataframe(
-    industry_diag.round(2),
-    use_container_width=True
-)
+st.dataframe(industry_diag.round(2), use_container_width=True)
 
-fig_auto = px.scatter(
-    industry_diag,
-    x="Churn_Velocity",
-    y="WER",
-    size="Opportunity_Score",
-    color="Strategic_Action",
-    hover_name="INDUSTRY"
-)
+# ==========================================================
+# SAFE SCATTER PLOT
+# ==========================================================
 
-fig_auto.add_hline(y=1, line_dash="dash")
-st.plotly_chart(fig_auto, use_container_width=True)
+if not industry_diag.empty:
+
+    fig_auto = px.scatter(
+        industry_diag,
+        x="Churn_Velocity",
+        y="WER",
+        size="Opportunity_Score",
+        color="Strategic_Action",
+        hover_name="INDUSTRY",
+        size_max=60
+    )
+
+    fig_auto.add_hline(y=1, line_dash="dash")
+    st.plotly_chart(fig_auto, use_container_width=True)
 
 st.markdown("---")
 
 # ==========================================================
-# DATA-DRIVEN REVENUE MODELING
+# REVENUE MODELING
 # ==========================================================
 
 st.header("🎯 Sales Hiring → Revenue Impact")
@@ -209,6 +212,7 @@ growth_scaler = max(0.1, total_net / max(1, df["NET_WAPP"].sum()))
 scaled_quota = arr_quota * growth_scaler
 
 ramp_factor = min(1.0, ramp_months / 6)
+
 effective_arr_per_rep = scaled_quota * (quota_attainment / 100) * ramp_factor
 
 existing_arr = current_headcount * effective_arr_per_rep
@@ -225,65 +229,4 @@ col2.metric("ARR Required", f"${required_arr:,.0f}")
 col3.metric("Revenue at Risk", f"${arr_gap:,.0f}")
 col4.metric("Effective ARR / Rep", f"${effective_arr_per_rep:,.0f}")
 
-st.markdown("---")
-
-# ==========================================================
-# FUNNEL SIMULATION
-# ==========================================================
-
-st.subheader("📊 Hiring Funnel")
-
-stages = ["Sourcing","Phone Screen","Hiring Manager","Final Round","Offer","Accepted"]
-drop_rates = [1, 0.7, 0.8, 0.75, 0.8, 0.85]
-
-counts = []
-base = max(pipeline_count * 3, 1)
-
-for rate in drop_rates:
-    base = int(base * rate)
-    counts.append(base)
-
-funnel_df = pd.DataFrame({"Stage": stages, "Candidates": counts})
-
-st.plotly_chart(
-    px.bar(funnel_df, x="Stage", y="Candidates"),
-    use_container_width=True
-)
-
-st.markdown("---")
-
-# ==========================================================
-# RAMP VISUAL
-# ==========================================================
-
-st.subheader("⏱ Ramp to Productivity")
-
-months = list(range(1, ramp_months + 1))
-target_ramp = np.linspace(0, 100, ramp_months)
-actual_ramp = target_ramp * (quota_attainment / 100)
-
-ramp_df = pd.DataFrame({
-    "Month": months,
-    "Target": target_ramp,
-    "Actual": actual_ramp
-})
-
-st.plotly_chart(
-    px.line(ramp_df, x="Month", y=["Target","Actual"], markers=True),
-    use_container_width=True
-)
-
-st.markdown("---")
-
-# ==========================================================
-# SCENARIO SIMULATOR
-# ==========================================================
-
-st.subheader("🧮 Scenario Simulator")
-
-hires_per_month = st.slider("Hires per Month", 1, 15, 5)
-projected_arr = hires_per_month * effective_arr_per_rep
-
-st.metric("Projected ARR Impact", f"${projected_arr:,.0f}")
-
-st.success("Dynamic revenue modeling powered by WAPP demand + hiring inputs.")
+st.success("Dashboard running with fully safe automated intelligence.")
